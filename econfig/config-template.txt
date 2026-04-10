@@ -1,0 +1,13 @@
+<variable1>:Hostname1:
+<variable2>:Hostname2:
+<vraiable3>:IP-NETZ1:
+
+!--------CONFIG START -----------!
+
+hostname <variable1>
+
+interface GigabitEthernet0/1/6
+ description ### MPLS-H ### <variable2>
+
+interface GigabitEthernet0/1/0.2702
+ ip address <vraiable3> 255.255.255.252

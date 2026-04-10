@@ -1,0 +1,33 @@
+<router_name>
+<domain-name>
+<dns_server1:8.8.8.8|1.1.1.1|8.8.4.4|1.0.0.1>
+<dns_server2:9.9.9.9|9.9.9.1|2.56.220.2>
+<wan_interface:Gi0/0/0|Gi0/0/1|Ten0/0/0|Ten0/0/1>
+<hub_router_name:hub-rt1|hub-rt2|hub-rt3|hub-rt4>
+<wan_network>
+<<wan_link_ip1>> 
+<<wan_link_ip2>>
+<<macsec_key>>
+<<wan_interface_desc>>
+! test 
+!--------end_of_the_variable_definition------------
+
+hostname <router_name>
+
+ip domain name <domain-name>
+
+ip name-server <dns_server1> <dns_server2>
+
+no ip domain lookup 
+
+interface <wan_interface>
+ desc ## connection to <hub_router_name> 
+ ip address <<wan_link_ip1>>
+ no ip red
+ no ip prox 
+ no shutdown 
+
+line vty 0 15 
+transport input ssh 
+transport outout ssh telnet 
+login 
