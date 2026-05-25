@@ -1,7 +1,7 @@
 #!/usr/bin/env zsh
 # MacPrepE.sh — macOS dev environment setup & update
 
-VERSION="0.10"
+VERSION="0.11"
 
 # ---------------------------------------------------------------------------
 # Packages
@@ -22,11 +22,13 @@ BREW_PACKAGES=(
     screen
     tcpreplay
     git-filter-repo
+    python-tk
 )
 
 PIP_PACKAGES=(
     scapy
-)
+    pysnmp
+    )
 
 # Remote install scripts — fetched and executed via bash
 REMOTE_INSTALLERS=(
@@ -133,4 +135,8 @@ sync_pip_packages
 
 log "Done."
 # Reload shell environment so all installed tools are immediately available
-source "$ZSHRC"
+if [[ -n "$ZSH_VERSION" ]]; then
+    source "$ZSHRC"
+else
+    log "Skipping shell reload — not running in zsh (run: source ~/.zshrc manually)"
+fi
