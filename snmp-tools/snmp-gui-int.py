@@ -330,9 +330,13 @@ class InterfaceGraph(tk.Frame):
     def add_point(self, if_idx, ts, in_bps, out_bps,
                   in_pps=0.0, out_pps=0.0,
                   in_err=0.0, out_err=0.0, in_disc=0.0, out_disc=0.0):
+        """Nur History befüllen — kein Tk-Call. Redraw erfolgt separat."""
         self.history[if_idx].append(
             (ts, in_bps, out_bps, in_pps, out_pps,
              in_err, out_err, in_disc, out_disc))
+
+    def redraw_if_selected(self, if_idx):
+        """Expliziter Redraw — nur aufrufen wenn im Main-Thread."""
         if if_idx == self.if_idx:
             self._redraw()
 
@@ -878,36 +882,49 @@ class App(tk.Tk):
             self._log("Kein Host angegeben!", "error")
             return
         self._log(f"Abfrage {cfg['host']} SNMP{cfg['version']} ...", "dim")
+        # Tk-Widget-Werte JETZT lesen (noch im Main-Thread via _loop→sleep→hier)
+        # _poll wird aus threading.Thread aufgerufen → muss Tk-Reads vermeiden.
+        # Daher: Filter-Werte werden als Snapshot an _process übergeben.
+        try:
+            flt       = self.e_filter.get().strip().lower()
+            skip_down = self.var_skip_down.get()
+        except Exception:
+            flt, skip_down = "", True
         try:
             data = asyncio.run(poll_device(cfg))
         except Exception as exc:
             self._log(f"Fehler: {exc}", "error")
             self._setstatus("Fehler", RED)
             return
-        self._process(data)
+        self._process(data, flt, skip_down)
 
     # ── Verarbeitung ──────────────────────────────────────────────────────────
-    def _process(self, data):
+    def _process(self, data, flt="", skip_down=True):
+        """
+        Läuft im Worker-Thread.
+        Alle Berechnungen hier, KEINE direkten Tk-Aufrufe.
+        Tk-Updates nur via self.after(0, ...).
+        """
         now = time.time()
+
+        # Sysname — sicher via after
         if data["sysname"]:
             n = data["sysname"]
             self.after(0, lambda: self.device_name.set(n))
 
-        flt  = self.e_filter.get().strip().lower()
-        rows = []
+        rows        = []   # Tabellen-Daten
+        graph_pts   = []   # (idx, ts, in_bps, out_bps, ipps, opps, ie_r, oe_r, id_r, od_r)
 
         for idx, raw in data["if_names"].items():
             name = str(raw)
             if flt and flt not in name.lower():
                 continue
             oper = safe_int(data["if_status"].get(idx, 2))
-            if self.var_skip_down.get() and oper != 1:
+            if skip_down and oper != 1:
                 continue
 
-            # Beschreibung: ifAlias bevorzugen (vom Admin gesetzt),
-            # Fallback auf ifDescr (Hardware-String)
-            alias = str(data["if_alias"].get(idx, "")).strip()
-            descr = str(data["if_descr"].get(idx, "")).strip()
+            alias       = str(data["if_alias"].get(idx, "")).strip()
+            descr       = str(data["if_descr"].get(idx, "")).strip()
             description = alias if alias else descr
             self.if_desc_cache[idx] = description
 
@@ -923,20 +940,18 @@ class App(tk.Tk):
             if prev and tprev:
                 dt = now - tprev
                 if dt > 0:
-                    ibps = max(0,(curr["io"]-prev["io"])*8/dt)
-                    obps = max(0,(curr["oo"]-prev["oo"])*8/dt)
-                    ipps = max(0,(curr["ip"]-prev["ip"])/dt)
-                    opps = max(0,(curr["op"]-prev["op"])/dt)
+                    ibps = max(0, (curr["io"] - prev["io"]) * 8 / dt)
+                    obps = max(0, (curr["oo"] - prev["oo"]) * 8 / dt)
+                    ipps = max(0, (curr["ip"] - prev["ip"]) / dt)
+                    opps = max(0, (curr["op"] - prev["op"]) / dt)
             self.prev_data[idx] = curr
             self.prev_time[idx] = now
 
-            # Graph-Datenpunkt hinzufügen (Err/Disc als Rate /s)
             ie  = safe_int(data["in_err"].get(idx,  0))
             oe  = safe_int(data["out_err"].get(idx, 0))
             idv = safe_int(data["in_disc"].get(idx, 0))
             odv = safe_int(data["out_disc"].get(idx, 0))
 
-            # Err/Disc Delta-Rate berechnen
             ie_rate = oe_rate = id_rate = od_rate = 0.0
             prev_e = self.prev_errs.get(idx)
             if prev_e and tprev:
@@ -946,20 +961,21 @@ class App(tk.Tk):
                     oe_rate = max(0, (oe  - prev_e["oe"])  / dt2)
                     id_rate = max(0, (idv - prev_e["idv"]) / dt2)
                     od_rate = max(0, (odv - prev_e["odv"]) / dt2)
-            self.prev_errs[idx] = {"ie":ie,"oe":oe,"idv":idv,"odv":odv}
+            self.prev_errs[idx] = {"ie": ie, "oe": oe, "idv": idv, "odv": odv}
 
-            self.graph.add_point(idx, now, ibps, obps,
-                                 ipps, opps,
-                                 ie_rate, oe_rate, id_rate, od_rate)
+            # Graph-Punkt sammeln (kein Tk-Call!)
+            graph_pts.append((idx, now, ibps, obps, ipps, opps,
+                               ie_rate, oe_rate, id_rate, od_rate))
 
-            tag = "up" if oper==1 else "down" if oper==2 else "other"
-            if ie > 0 or oe > 0: tag = "errors"
+            tag = "up" if oper == 1 else "down" if oper == 2 else "other"
+            if ie > 0 or oe > 0:
+                tag = "errors"
 
             rows.append(dict(
                 idx=idx, name=name,
                 description=description,
                 status=STATUS_MAP.get(oper, str(oper)),
-                speed=_fmt_speed(safe_int(data["if_speed"].get(idx,0))),
+                speed=_fmt_speed(safe_int(data["if_speed"].get(idx, 0))),
                 in_bps=_fmt_bps(ibps),  out_bps=_fmt_bps(obps),
                 in_pps=f"{ipps:.1f}",   out_pps=f"{opps:.1f}",
                 in_err=str(ie),  out_err=str(oe),
@@ -969,8 +985,23 @@ class App(tk.Tk):
             ))
 
         self.poll_count += 1
-        self.after(0, lambda r=rows: self._update(r))
-        self.after(0, lambda: self._plbl.config(text=f"Polls: {self.poll_count}"))
+
+        # ── Alle Tk-Updates gebündelt via after(0) ──────────────────────────
+        def _tk_update():
+            # Graph-Punkte eintragen (nur history-append, kein Tk-Call in add_point)
+            updated_idxs = set()
+            for pt in graph_pts:
+                self.graph.add_point(*pt)
+                updated_idxs.add(pt[0])
+            # Einmaliger Redraw wenn das aktive Interface dabei war
+            if self.graph.if_idx in updated_idxs:
+                self.graph._redraw()
+            # Tabelle aktualisieren
+            self._update(rows)
+            # Poll-Counter
+            self._plbl.config(text=f"Polls: {self.poll_count}")
+
+        self.after(0, _tk_update)
         self._log(f"OK - {len(rows)} Interface(s) @ "
                   f"{datetime.now().strftime('%H:%M:%S')}", "ok")
 
