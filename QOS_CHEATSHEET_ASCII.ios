@@ -43,7 +43,7 @@
 │ Provider Control       │    7    │  CS7 │  56  │ 224 │    E0   │      │   1  │   1  │   1  │   0  │   0  │   0  │   0  │   0  │
 ├────────────────────────┴─────────┴──────┴──────┴─────┴─────────┴──────┴──────┴──────┴──────┴──────┴──────┴──────┴──────┴──────┤
 │  DSCP = Differentiated Services Code Point (L3)      |  AF = Assured Forwarding                                               |
-│  ToS = Type of Service  (L3/)                        |  CS = Class Selector                                                   |
+│  ToS = Type of Service  (L3)                        |  CS = Class Selector                                                   |
 │  IPP = IP Precedence    (L3)                         |  DP = Drop Probability                                                 |
 │  CoS = Class of Service (L2)                         |                                    Version 1.0  by Ewald Jeitler 2026  |
 └───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
